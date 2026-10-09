@@ -1,0 +1,14 @@
+# Copy to ~/.config/m4o/config.toml or pass --config PATH.
+# CLI > MIHOMO_URL / MIHOMO_SECRET > this file > defaults.
+url = "http://127.0.0.1:9090"
+# Prefer the MIHOMO_SECRET environment variable.
+# If you store a secret here, use chmod 600 and do not commit this file.
+# secret = ""
+verify_tls = true
+# Environment HTTP(S) proxies are ignored. Opt in explicitly if necessary:
+# proxy = "http://localhost:9999"
+timeout = 10.0
+interval = 1000
+refresh_interval = 5.0
+max_logs = 5000
+test_url = "https://www.gstatic.com/generate_204"

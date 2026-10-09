@@ -1,0 +1,168 @@
+Screen {
+    background: $background;
+}
+Header {
+    background: $primary-background;
+}
+#network-status {
+    height: auto;
+    min-height: 1;
+    max-height: 4;
+    background: $surface;
+    padding: 0 1;
+}
+#pages {
+    height: 1fr;
+}
+TabPane {
+    padding: 0 1;
+}
+Overview, Proxies, Connections, Logs {
+    height: 1fr;
+}
+.section-title {
+    color: $accent;
+    text-style: bold;
+    margin: 1 0;
+    height: auto;
+}
+.muted {
+    color: $text-muted;
+}
+#rates {
+    height: 10;
+}
+.metric {
+    width: 1fr;
+    height: 10;
+    padding: 1 2;
+    margin-right: 1;
+    border: round $primary;
+    background: $surface;
+}
+.metric-value {
+    text-style: bold;
+    color: $success;
+    height: 2;
+}
+Sparkline {
+    height: 3;
+    color: $accent;
+}
+.card {
+    height: auto;
+    padding: 1 2;
+    margin: 1 0 0 0;
+    background: $surface;
+    border-left: thick $primary;
+}
+.help-card {
+    margin-bottom: 1;
+}
+.toolbar {
+    height: 3;
+    margin: 1 0;
+    align-vertical: middle;
+}
+.toolbar-label {
+    width: 12;
+    content-align: left middle;
+    height: 3;
+}
+.toolbar Button {
+    margin-right: 1;
+    min-width: 10;
+}
+.toolbar Input {
+    width: 1fr;
+    min-width: 10;
+    margin-right: 1;
+}
+#mode {
+    width: 24;
+    margin-right: 1;
+}
+#proxy-columns {
+    height: 1fr;
+}
+#group-pane {
+    width: 35%;
+    min-width: 22;
+    padding-right: 1;
+}
+#node-pane {
+    width: 1fr;
+    border-left: solid $surface-lighten-2;
+    padding-left: 1;
+}
+#group-info {
+    height: 3;
+    margin-top: 1;
+    color: $accent;
+}
+#proxy-search {
+    margin-bottom: 1;
+}
+DataTable {
+    height: 1fr;
+    scrollbar-size-horizontal: 1;
+}
+DataTable:focus {
+    border: solid $primary;
+}
+.hint {
+    height: auto;
+    max-height: 3;
+    color: $text-muted;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+#connection-sort {
+    width: 21;
+}
+#log-level {
+    width: 14;
+    margin-right: 1;
+}
+#pause-logs {
+    width: 18;
+}
+#clear-logs {
+    min-width: 8;
+    width: 8;
+}
+#log-output {
+    height: 1fr;
+    border: round $surface-lighten-2;
+    padding: 0 1;
+    background: $surface;
+}
+#log-output:focus {
+    border: round $primary;
+}
+Confirm, Information {
+    align: center middle;
+    background: $background 75%;
+}
+.dialog {
+    width: 85%;
+    max-width: 100;
+    height: 85%;
+    padding: 1 2;
+    border: thick $primary;
+    background: $surface;
+}
+.dialog VerticalScroll {
+    height: 1fr;
+    margin-bottom: 1;
+}
+.dialog Static {
+    height: auto;
+}
+.confirm-dialog {
+    height: auto;
+    max-height: 85%;
+}
+.confirm-dialog .toolbar {
+    align-horizontal: right;
+}

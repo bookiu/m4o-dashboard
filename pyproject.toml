@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "m4o-dashboard"
+version = "0.1.0"
+description = "A keyboard- and mouse-friendly terminal dashboard for mihomo"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["textual>=8.2,<9", "aiohttp>=3.12,<4"]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.9"]
+
+[project.scripts]
+m4o = "m4o_dashboard.cli:main"
+mihomo-dashboard = "m4o_dashboard.cli:main"
+
+[tool.uv]
+required-version = ">=0.12.23"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/m4o_dashboard"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
