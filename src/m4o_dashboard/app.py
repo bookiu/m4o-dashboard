@@ -15,8 +15,8 @@ from textual.worker import Worker, WorkerState
 
 from .api import APIError, MihomoClient
 from .config import Settings
-from .models import DashboardState, clean
-from .ui import Command, Confirm, Connections, Information, Logs, Overview, Proxies
+from .models import DashboardState
+from .ui import Command, Confirm, Connections, Information, Logs, Overview, Proxies, display_text
 
 HELP = """M4O · Mihomo terminal dashboard
 
@@ -211,7 +211,9 @@ class Dashboard(App[None]):
             if self._activity:
                 line.append(f"  {self._activity}", style="cyan")
             if failed:
-                line.append("\n " + clean(failed[0]) + " · 保留最后数据 / 自动重试", style="yellow")
+                line.append(
+                    "\n " + display_text(failed[0]) + " · 保留最后数据 / 自动重试", style="yellow"
+                )
             if not self.settings.verify_tls:
                 line.append("\n TLS verification DISABLED", style="bold red")
             screen.query_one("#network-status", Static).update(line)
@@ -382,7 +384,7 @@ class Dashboard(App[None]):
                 self._dirty.update(("connections", "overview"))
             else:
                 raise APIError("Unknown operation")
-            self.notify(Text(clean(message)), title="完成")
+            self.notify(display_text(message), title="完成", markup=False)
             try:
                 await self.refresh_snapshot()
             except APIError as exc:
@@ -392,7 +394,9 @@ class Dashboard(App[None]):
         except APIError as exc:
             if action == "delay":
                 self.state.delays[args[0]] = None
-            self.notify(Text(str(exc)), title="操作失败", severity="error", timeout=7)
+            self.notify(
+                display_text(str(exc)), title="操作失败", severity="error", timeout=7, markup=False
+            )
         finally:
             self._mutation_busy = False
             self._activity = ""

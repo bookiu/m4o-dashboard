@@ -1,12 +1,22 @@
 import asyncio
 
 import pytest
+from rich.cells import get_character_cell_size
+from textual.app import App
 from textual.widgets import Button, DataTable, Input, RichLog, Select, Static, TabbedContent
 
 from m4o_dashboard.app import Dashboard
 from m4o_dashboard.config import Settings
 from m4o_dashboard.models import DashboardState
-from m4o_dashboard.ui import Confirm, Information, Logs, Proxies, selected_key, sync_table
+from m4o_dashboard.ui import (
+    Confirm,
+    Information,
+    Logs,
+    Proxies,
+    add_columns,
+    selected_key,
+    sync_table,
+)
 
 
 async def eventually(predicate):
@@ -19,7 +29,7 @@ async def eventually(predicate):
 @pytest.fixture
 async def dashboard(demo):
     app = Dashboard(Settings(url=demo.url, secret=demo.secret, refresh_interval=1))
-    async with app.run_test(size=(120, 36)) as pilot:
+    async with app.run_test(size=(120, 36), notifications=True) as pilot:
         await eventually(lambda: all(value[0] for value in app.statuses.values()))
         await pilot.pause()
         yield app, pilot
@@ -77,6 +87,46 @@ async def test_keyboard_proxy_switch_delay_and_automatic_group(dashboard, demo):
     await pilot.pause()
     assert app.query_one("#use-node", Button).disabled
     assert app.query_one("#unpin-node", Button).disabled
+
+
+async def test_proxy_switch_notification_renders_literal_node_name(dashboard, demo):
+    app, pilot = dashboard
+    node = "✈️机场 [red]HK[/red]"
+    demo.proxies[node] = {**demo.proxies[demo.nodes[1]], "name": node}
+    demo.proxies[demo.group]["all"][1] = node
+    await app.refresh_snapshot()
+
+    await pilot.press("2", "enter", "down", "enter")
+    await eventually(lambda: demo.proxies[demo.group]["now"] == node)
+    await eventually(lambda: not app._mutation_busy)
+    await pilot.pause()
+
+    toast = app.query_one("Toast.-information")
+    assert toast.region.height > 0
+    assert toast.render().plain == "完成\n已切换至 ✈\ufe0e机场 [red]HK[/red]（已有连接保持不变）"
+    assert app.state.proxies[demo.group]["now"] == node
+    await pilot.resize_terminal(100, 30)
+    await pilot.press("3")
+    assert app.current_page() == "connections"
+
+
+async def test_failed_proxy_switch_notification_keeps_dashboard_interactive(dashboard, demo):
+    app, pilot = dashboard
+    demo.secret += "-changed"
+
+    await pilot.press("2", "enter", "down", "enter")
+    await eventually(lambda: not app._mutation_busy)
+    await pilot.pause()
+
+    toast = app.query_one("Toast.-error")
+    assert toast.region.height > 0
+    assert toast.render().plain == (
+        "操作失败\nHTTP 401: authentication denied; check MIHOMO_SECRET"
+    )
+    assert app.settings.secret not in toast.render().plain
+    assert demo.proxies[demo.group]["now"] == demo.nodes[0]
+    await pilot.press("1")
+    assert app.current_page() == "overview"
 
 
 async def test_mouse_tabs_node_button_and_mode_change(dashboard, demo):
@@ -169,6 +219,76 @@ async def test_incremental_rows_preserve_key_and_scroll(dashboard):
     assert table.get_row(key)[1].plain == "changed"
     sync_table(table, [])
     assert selected_key(table) is None
+
+
+async def test_emoji_table_columns_align_in_codepoint_based_terminals():
+    names = [
+        ("普通规则", "普通规则"),
+        ("✈️机场", "✈\ufe0e机场"),
+        ("☁️云规则", "☁\ufe0e云规则"),
+        ("Ⓜ️微软", "Ⓜ\ufe0e微软"),
+        ("🇭🇰香港", "🇭🇰香港"),
+        ("🚀节点", "🚀节点"),
+        ("⚡快速", "⚡快速"),
+        ("1️⃣规则", "1\ufe0e\u20e3规则"),
+        ("x" * 20 + "☁️", "x" * 20 + "☁\ufe0e"),
+        ("x" * 21 + "✈️", "x" * 21 + "✈\ufe0e"),
+    ]
+    app = App()
+    async with app.run_test(size=(80, 24)) as pilot:
+        table = DataTable(cursor_type="row")
+        await app.mount(table)
+        add_columns(table, [("规则", 22), ("标记", 4)])
+        sync_table(table, [(name, (name, "END")) for name, _ in names])
+        await pilot.pause()
+        for row, (name, expected) in enumerate(names):
+            line = table.render_line(row + 1).text
+            assert expected in line
+            prefix = line[: line.index("END")]
+
+            # Codepoint-based terminals do not widen a symbol when they receive VS16.
+            terminal_column = sum(get_character_cell_size(char) for char in prefix)
+            assert terminal_column == 25, (name, terminal_column)
+            table.move_cursor(row=row, animate=False)
+            assert selected_key(table) == name
+
+
+async def test_emoji_table_sort_and_selection_preserve_distinct_raw_names():
+    names = ["✈\ufe0f节点", "✈\ufe0e节点", "✈节点"]
+    app = App()
+    async with app.run_test(size=(80, 24)) as pilot:
+        table = DataTable(cursor_type="row")
+        await app.mount(table)
+        add_columns(table, [("节点", 22), ("值", 4)])
+        rows = [(name, (name, str(index))) for index, name in enumerate(names)]
+        sync_table(table, rows)
+        table.move_cursor(row=1, animate=False)
+        sync_table(table, list(reversed(rows)))
+        await pilot.pause()
+        assert selected_key(table) == names[1]
+        for row, name in enumerate(reversed(names)):
+            table.move_cursor(row=row, animate=False)
+            assert selected_key(table) == name
+        assert table.row_count == 3
+
+
+async def test_emoji_logs_and_details_use_text_presentation_without_changing_state(dashboard):
+    app, pilot = dashboard
+    message = "emoji-rule ☁\ufe0f云 [red]"
+    app.state.add_log({"payload": message})
+    await pilot.press("4")
+    app.query_one("#log-search", Input).value = "emoji-rule"
+    await pilot.pause()
+    output = app.query_one("#log-output", RichLog)
+    assert "emoji-rule ☁\ufe0e云 [red]" in "\n".join(line.text for line in output.lines)
+    assert any(entry.message == message for entry in app.state.logs)
+
+    raw = {"rulePayload": message}
+    app.push_screen(Information("✈\ufe0f规则详情", raw))
+    await pilot.pause()
+    assert app.screen.query_one(".section-title").render().plain == "✈\ufe0e规则详情"
+    assert "☁\ufe0e云 [red]" in app.screen.query_one("VerticalScroll > Static").render().plain
+    assert raw == {"rulePayload": message}
 
 
 @pytest.mark.parametrize("terminal_size", [(80, 24), (160, 48)])

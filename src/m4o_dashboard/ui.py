@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from rich.text import Text
 from textual import on
@@ -15,6 +16,21 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Input, Label, RichLog, Select, Sparkline, Static
 
 from .models import DashboardState, clean, size
+
+
+def display_text(value: str) -> str:
+    """Prefer text presentation where terminals disagree on emoji sequence width."""
+    return clean(value).replace("\ufe0f", "\ufe0e")
+
+
+@dataclass(frozen=True)
+class TableText:
+    """Keep the original cell value for identity/sorting, normalize only its display."""
+
+    plain: str
+
+    def __rich__(self) -> Text:
+        return Text(display_text(self.plain))
 
 
 class Command(Message):
@@ -53,7 +69,7 @@ def sync_table(table: DataTable, rows: Iterable[tuple[str, tuple[str, ...]]]) ->
             table.remove_row(key)
     columns = list(table.columns)
     for key, cells in rows:
-        rendered = tuple(Text(clean(cell)) for cell in cells)
+        rendered = tuple(TableText(cell) for cell in cells)
         if key not in table.rows:
             table.add_row(*rendered, key=key)
         else:
@@ -61,7 +77,7 @@ def sync_table(table: DataTable, rows: Iterable[tuple[str, tuple[str, ...]]]) ->
                 if old != new:
                     table.update_cell(key, column, new)
     if rows:
-        rank = {clean(key): index for index, (key, _) in enumerate(rows)}
+        rank = {key: index for index, (key, _) in enumerate(rows)}
         table.sort("identity", key=lambda cell: rank.get(cell.plain, len(rank)))
         if chosen in wanted:
             table.move_cursor(row=table.get_row_index(chosen), animate=False, scroll=False)
@@ -125,7 +141,7 @@ class Overview(VerticalScroll, can_focus=True):
         mode = str(state.configs.get("mode", "—")).lower()
         self.query_one("#controller-info", Static).update(
             Text(
-                clean(
+                display_text(
                     f"{endpoint}\nMihomo {state.version}   ·   当前模式 {mode}"
                     f"   ·   代理组 {len(state.groups)}   ·   节点/组 {len(state.proxies)}"
                 )
@@ -193,7 +209,7 @@ class Proxies(Vertical):
         fixed = str(group.get("fixed") or "")
         self.query_one("#group-info", Static).update(
             Text(
-                clean(
+                display_text(
                     f"{self.group or '暂无策略组'}  ·  {kind}\n当前: {current}"
                     + (f"  ·  固定: {fixed}" if fixed else "")
                 )
@@ -417,7 +433,7 @@ class Logs(Vertical):
             if entry.matches(query, level):
                 style = {"error": "red", "warning": "yellow", "debug": "dim"}.get(entry.level, "")
                 line = Text(f"{entry.time}  {entry.level.upper():7}  ", style=style)
-                line.append(entry.message)
+                line.append(display_text(entry.message))
                 output.write(line, scroll_end=True, animate=False)
         self.last_seen = self.state.logs_seen
         self.update_status()
@@ -467,7 +483,7 @@ class Confirm(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog confirm-dialog"):
             yield Label("确认操作", classes="section-title")
-            yield Static(Text(clean(self.message)))
+            yield Static(Text(display_text(self.message)))
             with Horizontal(classes="toolbar"):
                 yield Button("取消 (Esc)", id="cancel")
                 yield Button("确认关闭", id="confirm", variant="error")
@@ -498,9 +514,9 @@ class Information(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label(Text(clean(self.heading)), classes="section-title")
+            yield Label(Text(display_text(self.heading)), classes="section-title")
             with VerticalScroll():
-                yield Static(Text(clean(self.content)))
+                yield Static(Text(display_text(self.content)))
             yield Button("关闭 (Esc)", id="dismiss", variant="primary")
 
     @on(Button.Pressed, "#dismiss")
