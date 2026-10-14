@@ -8,9 +8,10 @@ from textual.widgets import Button, Checkbox, DataTable, Input, Select, Static
 from m4o_dashboard.api import APIError
 from m4o_dashboard.app import Dashboard
 from m4o_dashboard.config import Settings
+from m4o_dashboard.kernel_config import KernelConfig
 from m4o_dashboard.models import DashboardState
 from m4o_dashboard.overview import Overview, TrafficChart
-from m4o_dashboard.panels import KernelConfig, Rules
+from m4o_dashboard.panels import Rules
 from m4o_dashboard.ui import Confirm, Information, add_columns, selected_key, sync_table
 
 
@@ -79,7 +80,7 @@ async def test_config_draft_survives_polling_and_only_changed_fields_are_applied
     assert port.value == "7891"
     assert app.query_one("#config-ipv6", Checkbox).value  # Unsaved form stays intact.
     before = len([call for call in demo.calls if call[0] == "PATCH"])
-    await pilot.press("ctrl+s")
+    await pilot.press("ctrl+enter")
     await eventually(lambda: demo.config_values["mixed-port"] == 7891)
     await eventually(lambda: not app._mutation_busy)
     assert len([call for call in demo.calls if call[0] == "PATCH"]) == before + 1
@@ -97,9 +98,9 @@ async def test_invalid_config_and_typing_never_write_or_trigger_navigation(dashb
     assert app.current_page() == "config"
     assert port.value == "1rq"
     before = [call for call in demo.calls if call[0] == "PATCH"]
-    await pilot.press("ctrl+s")
+    await pilot.press("ctrl+enter")
     port.value = "70000"
-    await pilot.press("ctrl+s")
+    await pilot.press("ctrl+enter")
     await eventually(lambda: not app._mutation_busy)
     assert [call for call in demo.calls if call[0] == "PATCH"] == before
     assert port.value == "70000"

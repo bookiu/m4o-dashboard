@@ -11,7 +11,7 @@ async def test_rules_endpoint_preserves_order_payloads_and_names(client, demo):
     assert rules == demo.rules
     state = DashboardState()
     state.update_rules(rules)
-    assert [rule.index for rule in state.rules] == [1, 2, 3, 4, 5, 6]
+    assert [rule.index for rule in state.rules] == list(range(1, len(demo.rules) + 1))
     assert state.rules[0].kind == "DOMAIN-SUFFIX"
     assert state.rules[2].kind == "GEOIP"
     assert state.rules[3].kind == "IP-CIDR"
@@ -45,7 +45,7 @@ async def test_config_patch_updates_supported_fields_only(client, demo):
         "find-process-mode": "off",
     }
     await client.update_configs(changes)
-    assert demo.config_values == changes
+    assert all(demo.config_values[key] == value for key, value in changes.items())
     assert demo.mode == "rule"
     before = list(demo.calls)
     await client.update_configs({})

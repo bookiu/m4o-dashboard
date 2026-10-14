@@ -28,6 +28,11 @@ class DemoServer:
         self.mode = "rule"
         self.config_values = {
             "mixed-port": 7890,
+            "port": 0,
+            "socks-port": 0,
+            "redir-port": 0,
+            "tproxy-port": 0,
+            "tun": {"enable": False, "stack": "mixed", "auto-route": True},
             "allow-lan": False,
             "ipv6": True,
             "log-level": "info",
@@ -37,15 +42,27 @@ class DemoServer:
         self.down = 2_048_000
         self.upload_total = 12_000_000
         self.download_total = 980_000_000
-        self.nodes = ["香港 HK-01", "日本 / Tokyo", "Singapore 🇸🇬", "DIRECT"]
+        self.nodes = [
+            "香港 HK-01",
+            "日本 / Tokyo",
+            "Singapore 🇸🇬",
+            "HK-02",
+            "SG-02",
+            "JP-02",
+            "US-01",
+            "DIRECT",
+        ]
         self.group = "🚀 节点 / Proxy"
         self.proxies: dict[str, dict] = {
             node: {
                 "name": node,
-                "type": "Direct" if node == "DIRECT" else "Shadowsocks",
+                "type": "Direct"
+                if node == "DIRECT"
+                else ("VLESS", "Trojan", "Hysteria2", "Shadowsocks")[index % 4],
                 "udp": True,
                 "alive": True,
-                "history": [{"delay": 25 + index * 31}],
+                "history": [{"delay": 25 + index * 31, "time": datetime.now(UTC).isoformat()}],
+                "provider-name": "main",
             }
             for index, node in enumerate(self.nodes)
         }
@@ -65,6 +82,8 @@ class DemoServer:
                     "fixed": "",
                 },
                 "负载均衡": {"name": "负载均衡", "type": "LoadBalance", "all": self.nodes[:3]},
+                "STREAMING": {"type": "Selector", "all": self.nodes.copy(), "now": self.nodes[2]},
+                "AI": {"type": "Selector", "all": self.nodes.copy(), "now": self.nodes[2]},
             }
         )
         self.rules = [
@@ -73,8 +92,24 @@ class DemoServer:
             {"type": "GeoIP", "payload": "CN", "proxy": "DIRECT"},
             {"type": "IPCIDR", "payload": "192.168.0.0/16", "proxy": "DIRECT"},
             {"type": "DomainSuffix", "payload": "example.org", "proxy": self.group},
+            {"type": "DomainSuffix", "payload": "google.com", "proxy": self.group},
+            {"type": "DomainSuffix", "payload": "youtube.com", "proxy": "STREAMING"},
+            {"type": "DomainSuffix", "payload": "openai.com", "proxy": "AI"},
+            {"type": "RuleSet", "payload": "proxy", "proxy": self.group},
+            {"type": "DomainSuffix", "payload": "bilibili.com", "proxy": "DIRECT"},
             {"type": "Match", "payload": "", "proxy": self.group},
         ]
+        self.rule_providers = {
+            name: {
+                "name": name,
+                "behavior": "Domain",
+                "format": "mrs",
+                "vehicleType": "HTTP",
+                "ruleCount": 240,
+                "updatedAt": datetime.now(UTC).isoformat(),
+            }
+            for name in ("ads", "proxy", "private", "direct")
+        }
         self.connections = {
             f"demo-{index:04d}": {
                 "id": f"demo-{index:04d}",
@@ -114,6 +149,8 @@ class DemoServer:
                 web.patch("/configs", self.configs),
                 web.get("/proxies", self.list_proxies),
                 web.get("/rules", self.list_rules),
+                web.get("/providers/rules", self.list_rule_providers),
+                web.put("/providers/rules/{name}", self.update_rule_provider),
                 web.get("/proxies/{name}/delay", self.delay),
                 web.get("/proxies/{name}", self.proxy),
                 web.put("/proxies/{name}", self.proxy),
@@ -173,6 +210,17 @@ class DemoServer:
             return web.Response(status=204)
         return web.json_response({"mode": self.mode, **self.config_values})
 
+    async def list_rule_providers(self, request: web.Request) -> web.Response:
+        return web.json_response({"providers": self.rule_providers})
+
+    async def update_rule_provider(self, request: web.Request) -> web.Response:
+        name = request.match_info["name"]
+        if name not in self.rule_providers:
+            raise web.HTTPNotFound()
+        self.calls.append(("PUT", request.raw_path, None))
+        self.rule_providers[name]["updatedAt"] = datetime.now(UTC).isoformat()
+        return web.Response(status=204)
+
     async def list_rules(self, request: web.Request) -> web.Response:
         return web.json_response({"rules": self.rules})
 
@@ -209,7 +257,7 @@ class DemoServer:
             raise web.HTTPNotFound()
         self.calls.append(("GET", request.raw_path, None))
         delay = 20 + sum(name.encode()) % 140
-        self.proxies[name]["history"] = [{"delay": delay}]
+        self.proxies[name]["history"] = [{"delay": delay, "time": datetime.now(UTC).isoformat()}]
         return web.json_response({"delay": delay})
 
     def connection_snapshot(self) -> dict:

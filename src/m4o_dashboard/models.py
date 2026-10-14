@@ -100,6 +100,7 @@ class LogEntry:
     time: str
     level: str
     message: str
+    time_source: str = "客户端"
 
     @classmethod
     def parse(cls, raw: dict, secret: str = "") -> LogEntry:
@@ -115,6 +116,7 @@ class LogEntry:
             clean(raw.get("time") or datetime.now().strftime("%H:%M:%S")),
             clean(level),
             clean(message),
+            "内核" if raw.get("time") else "客户端",
         )
 
     def matches(self, query: str, minimum: str) -> bool:
@@ -152,7 +154,10 @@ class TrafficSample:
     down: float
 
 
+CONFIG_PORTS = ("mixed-port", "port", "socks-port", "redir-port", "tproxy-port")
+
 CONFIG_CHOICES = {
+    "mode": ("rule", "global", "direct"),
     "log-level": ("silent", "error", "warning", "info", "debug"),
     "find-process-mode": ("always", "strict", "off"),
 }
@@ -173,6 +178,10 @@ class DashboardState:
     traffic: deque[TrafficSample] = field(default_factory=lambda: deque(maxlen=180))
     rules: list[Rule] | None = None
     rules_error: str = ""
+    rule_providers: dict[str, dict] = field(default_factory=dict)
+    providers_error: str = ""
+    config_name: str = "运行配置"
+    connection_traffic: dict[str, deque[TrafficSample]] = field(default_factory=dict)
     logs: deque[LogEntry] = field(init=False)
     logs_seen: int = 0
     last_connection_time: float | None = None
@@ -226,6 +235,11 @@ class DashboardState:
                 entry.up_rate = max(0, entry.upload - old.upload) / elapsed
                 entry.down_rate = max(0, entry.download - old.download) / elapsed
             updated[entry.id] = entry
+        self.connection_traffic = {
+            key: self.connection_traffic.get(key, deque(maxlen=180)) for key in updated
+        }
+        for key, entry in updated.items():
+            self.connection_traffic[key].append(TrafficSample(now, entry.up_rate, entry.down_rate))
         self.connections = updated
         self.last_connection_time = now
         if "uploadTotal" in value:

@@ -358,3 +358,197 @@ Confirm, Information {
     min-width: 6;
     margin-right: 0;
 }
+
+/* Detailed pages share the reference's thin panels and generous inspector columns. */
+Proxies, Rules, Connections, Logs, KernelConfig {
+    overflow-y: auto;
+    scrollbar-size-vertical: 1;
+}
+.page-panel {
+    border: solid $panel-border;
+    padding: 0 1;
+    background: $background;
+}
+.page-panel DataTable, .page-panel DataTable:focus {
+    border: none;
+}
+.page-panel DataTable > .datatable--cursor {
+    background: $primary;
+    color: $background;
+}
+.page-panel Static {
+    height: auto;
+}
+.page-panel .panel-heading {
+    height: 2;
+    margin-bottom: 1;
+}
+.page-panel .panel-hint {
+    height: 1;
+}
+.stat-strip {
+    height: 4;
+    margin-bottom: 1;
+}
+.stat-card {
+    width: 1fr;
+    height: 4;
+    border: solid $panel-border;
+    padding: 0 1;
+    margin-right: 1;
+}
+.stat-card:last-child { margin-right: 0; }
+.compact-toolbar {
+    height: 3;
+    align-vertical: middle;
+}
+.compact-toolbar Input {
+    height: 3;
+    width: 1fr;
+    min-width: 12;
+    margin-right: 1;
+}
+.compact-toolbar Select {
+    width: 17;
+    height: 3;
+    margin-right: 1;
+}
+SelectCurrent {
+    border: solid $panel-divider;
+    background: $background;
+}
+.compact-toolbar SelectCurrent { height: 3; }
+.wide-action {
+    width: 1fr;
+    min-width: 0;
+    height: 3;
+    padding: 0 1;
+    border: solid $panel-divider;
+    background: $background;
+    color: $foreground;
+    text-style: none;
+}
+.wide-action:focus, .wide-action:hover, #apply-config {
+    background: $primary;
+    color: $background;
+    border: solid $primary;
+}
+#proxy-columns { height: 1fr; min-height: 35; }
+#group-pane {
+    width: 22%;
+    min-width: 25;
+    margin-right: 1;
+    padding: 0 1;
+}
+#groups { height: 1fr; }
+.group-help { height: 5; border-top: solid $panel-divider; padding-top: 1; }
+#proxy-main { width: 1fr; }
+#proxy-toolbar { height: 3; margin-bottom: 1; padding: 0; }
+#proxy-summary { width: 23; height: 1; }
+#proxy-toolbar Input { height: 1; border: none; }
+.proxy-mode {
+    width: 12;
+    min-width: 10;
+    height: 1;
+    border: none;
+    padding: 0;
+    background: $background;
+}
+.proxy-mode.selected-mode { color: $primary; }
+#node-pane { height: 1fr; width: 1fr; min-height: 14; padding: 0 1; }
+#group-info { margin: 0; height: 2; }
+.node-current { height: 2; border-bottom: solid $panel-divider; }
+#current-node { width: 1fr; }
+#proxy-bottom { height: 15; margin-top: 1; }
+#node-detail-panel { width: 1fr; margin-right: 1; }
+#switch-panel { width: 1fr; }
+#switch-preview { height: 6; }
+#rules-layout { height: 1fr; min-height: 33; }
+#rules-main { width: 2fr; margin-right: 1; }
+#rules-sidebar { width: 1fr; min-width: 32; }
+#rules-list-panel { height: 1fr; }
+#raw-rule-panel { height: 6; margin-top: 1; }
+#rule-detail-panel { height: 3fr; }
+#providers-panel { height: 2fr; min-height: 14; margin-top: 1; }
+#providers-table { min-height: 5; }
+#connections-layout { height: 1fr; min-height: 33; }
+#connections-main { width: 3fr; margin-right: 1; }
+#connection-filters { margin-bottom: 1; padding: 0; }
+#connection-filters Select { width: 15; }
+#connection-list-panel { height: 1fr; min-height: 12; }
+#connection-inspector { width: 1.1fr; min-width: 30; }
+#connection-inspector .panel-heading { margin-top: 1; }
+#connection-traffic-panel { height: 14; margin-top: 1; }
+#connection-traffic-body { height: 1fr; }
+#connection-traffic-stats { width: 27; border-right: solid $panel-divider; }
+#connection-chart { width: 1fr; height: 1fr; }
+#log-toolbar { margin-bottom: 1; padding: 0; }
+#log-level { width: 20; }
+#log-autoscroll { width: 17; height: 1; border: none; padding: 0; }
+#log-toolbar .panel-action { width: auto; padding: 0 1; }
+#log-layout { height: 1fr; min-height: 27; }
+#log-list-panel { width: 7fr; margin-right: 1; }
+#log-output, #log-output:focus { height: 1fr; border: none; padding: 0; }
+#log-sidebar { width: 3fr; min-width: 30; }
+#log-detail-panel { height: 1fr; }
+#log-message { margin-bottom: 1; }
+#log-controls { height: 9; margin-top: 1; }
+#log-controls .panel-heading { margin-bottom: 0; }
+#config-layout { height: 1fr; min-height: 36; }
+#config-sidebar { width: 21%; min-width: 23; margin-right: 1; }
+#config-categories { height: 15; }
+#config-file-name { margin-bottom: 1; }
+#config-editor { width: 47%; margin-right: 1; }
+#config-review { width: 1fr; min-width: 32; }
+#config-preview-panel { height: 1fr; min-height: 12; margin-bottom: 1; }
+#config-actions { height: 23; }
+#general-fields, #port-fields, #config-other { height: auto; }
+#config-other { padding: 1 0; }
+.config-row { height: 3; }
+.config-row Label { width: 1fr; height: 3; }
+.config-row Input, .config-row Select { width: 21; height: 3; }
+.config-row Checkbox { width: 21; height: 3; padding: 0; }
+.config-row .changed-marker { width: 3; color: $warning; text-align: center; }
+.config-explanation { height: auto; margin: 1 0; color: $text-muted; }
+.narrow .stat-strip { height: 4; }
+.narrow #proxy-columns { layout: horizontal; min-height: 38; }
+.narrow #group-pane { width: 24; height: 1fr; min-height: 0; padding: 0 1; }
+.narrow #proxy-summary { display: none; }
+.narrow .proxy-mode { width: 10; min-width: 8; }
+.narrow #proxy-toolbar { height: 5; layout: grid; grid-size: 3 2; }
+.narrow #proxy-search { column-span: 3; }
+.narrow #node-pane { height: 1fr; border: solid $panel-border; padding: 0 1; }
+.narrow #proxy-bottom { height: 18; }
+.narrow #rules-layout, .narrow #connections-layout, .narrow #log-layout {
+    layout: vertical;
+    height: auto;
+}
+.narrow #rules-main, .narrow #connections-main, .narrow #log-list-panel {
+    width: 1fr;
+    height: 32;
+    margin-right: 0;
+}
+.narrow #rules-sidebar { width: 1fr; height: 33; margin-top: 1; }
+.narrow #connection-inspector { width: 1fr; height: 44; margin-top: 1; }
+.narrow #log-sidebar { width: 1fr; height: 30; margin-top: 1; }
+.narrow #log-autoscroll { display: none; }
+.narrow #config-layout { layout: vertical; height: auto; }
+.narrow #config-sidebar { width: 1fr; height: 15; margin-right: 0; }
+.narrow #config-categories { height: 8; }
+.narrow #config-sidebar .panel-heading { margin: 0; }
+.narrow #config-file-name, .narrow #config-connection-status { display: none; }
+.narrow #config-editor { width: 1fr; height: 37; margin: 1 0; }
+.narrow #config-review { width: 1fr; height: 40; }
+#connection-filters, #log-toolbar { height: 5; }
+#switch-panel .panel-heading { margin-bottom: 0; }
+#switch-preview { height: 5; }
+#refresh-rules { height: 1; border: none; padding: 0; }
+#providers-panel { min-height: 15; }
+#connection-inspector .panel-heading { margin-top: 0; margin-bottom: 0; }
+#connection-inspector .wide-action { height: 2; border: none; }
+#connection-details { margin-bottom: 1; }
+#config-editor > .panel-heading { margin-bottom: 0; }
+#config-actions { height: 22; }
+#config-actions .panel-heading { margin-bottom: 0; }
+#config-actions .wide-action { margin: 0; }
+#log-detail-panel .panel-heading, #rule-detail-panel .panel-heading { margin-bottom: 0; }

@@ -22,9 +22,12 @@ class Settings:
     interval: int = 1000
     refresh_interval: float = 5.0
     max_logs: int = 5000
+    kernel_config: str = ""
     test_url: str = "https://www.gstatic.com/generate_204"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.kernel_config, str):
+            raise ValueError("kernel_config must be a local YAML path")
         for name in ("url", "test_url", "proxy"):
             value = getattr(self, name)
             if name == "proxy" and value == "":
