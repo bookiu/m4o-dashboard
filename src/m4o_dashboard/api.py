@@ -18,6 +18,7 @@ import aiohttp
 from yarl import URL
 
 from .config import Settings
+from .models import CONFIG_CHOICES
 
 StatusCallback = Callable[[str, bool, str], None]
 
@@ -124,6 +125,27 @@ class MihomoClient:
         if not isinstance(proxies.get("proxies"), dict):
             raise APIError("Invalid proxy list from controller")
         return version, configs, proxies["proxies"]
+
+    async def rules(self) -> list[dict]:
+        value = (await self.request("GET", "/rules")).get("rules")
+        if not isinstance(value, list) or any(not isinstance(rule, dict) for rule in value):
+            raise APIError("Invalid rule list from controller")
+        return value
+
+    async def update_configs(self, changes: dict[str, str | int | bool]) -> None:
+        for name, value in changes.items():
+            if name == "mixed-port":
+                valid = type(value) is int and 0 <= value <= 65535
+            elif name in {"allow-lan", "ipv6"}:
+                valid = isinstance(value, bool)
+            elif name in CONFIG_CHOICES:
+                valid = isinstance(value, str) and value in CONFIG_CHOICES[name]
+            else:
+                valid = False
+            if not valid:
+                raise APIError(f"Invalid or unsupported config field: {name}")
+        if changes:
+            await self.request("PATCH", "/configs", data=changes)
 
     async def select_proxy(self, group: str, node: str) -> None:
         await self.request("PUT", f"/proxies/{segment(group)}", data={"name": node})

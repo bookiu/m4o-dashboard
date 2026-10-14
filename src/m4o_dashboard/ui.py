@@ -13,7 +13,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Input, Label, RichLog, Select, Sparkline, Static
+from textual.widgets import Button, DataTable, Input, Label, RichLog, Select, Static
 
 from .models import DashboardState, clean, size
 
@@ -28,15 +28,19 @@ class TableText:
     """Keep the original cell value for identity/sorting, normalize only its display."""
 
     plain: str
+    row_key: str
 
     def __rich__(self) -> Text:
         return Text(display_text(self.plain))
 
 
 class Command(Message):
-    def __init__(self, action: str, *args: str) -> None:
+    def __init__(
+        self, action: str, *args: str, changes: dict[str, str | int | bool] | None = None
+    ) -> None:
         self.action = action
         self.args = args
+        self.changes = changes
         super().__init__()
 
 
@@ -58,8 +62,8 @@ def selected_key(table: DataTable) -> str | None:
 def sync_table(table: DataTable, rows: Iterable[tuple[str, tuple[str, ...]]]) -> None:
     """Patch keyed rows instead of rebuilding, preserving cursor and scroll.
 
-    Every table's identity column contains its full unique key (the column can
-    visually truncate it). Sorting uses that key, not a row's changing position.
+    The first cell carries the raw row key independently of its displayed value.
+    Sorting and selection never depend on truncated or normalized labels.
     """
     rows = list(rows)
     chosen = selected_key(table)
@@ -69,7 +73,7 @@ def sync_table(table: DataTable, rows: Iterable[tuple[str, tuple[str, ...]]]) ->
             table.remove_row(key)
     columns = list(table.columns)
     for key, cells in rows:
-        rendered = tuple(TableText(cell) for cell in cells)
+        rendered = tuple(TableText(cell, key) for cell in cells)
         if key not in table.rows:
             table.add_row(*rendered, key=key)
         else:
@@ -78,7 +82,7 @@ def sync_table(table: DataTable, rows: Iterable[tuple[str, tuple[str, ...]]]) ->
                     table.update_cell(key, column, new)
     if rows:
         rank = {key: index for index, (key, _) in enumerate(rows)}
-        table.sort("identity", key=lambda cell: rank.get(cell.plain, len(rank)))
+        table.sort("identity", key=lambda cell: rank[cell.row_key])
         if chosen in wanted:
             table.move_cursor(row=table.get_row_index(chosen), animate=False, scroll=False)
 
@@ -86,74 +90,6 @@ def sync_table(table: DataTable, rows: Iterable[tuple[str, tuple[str, ...]]]) ->
 def add_columns(table: DataTable, columns: list[tuple[str, int | None]]) -> None:
     for index, (label, width) in enumerate(columns):
         table.add_column(label, key="identity" if index == 0 else str(index), width=width)
-
-
-class Overview(VerticalScroll, can_focus=True):
-    def compose(self) -> ComposeResult:
-        yield Label("LIVE TRAFFIC  ·  流量总览", classes="section-title")
-        with Horizontal(id="rates"):
-            with Vertical(classes="metric"):
-                yield Label("↓ DOWNLOAD", classes="muted")
-                yield Static("—", id="download-rate", classes="metric-value")
-                yield Sparkline([0], id="download-chart")
-            with Vertical(classes="metric"):
-                yield Label("↑ UPLOAD", classes="muted")
-                yield Static("—", id="upload-rate", classes="metric-value")
-                yield Sparkline([0], id="upload-chart")
-        yield Static("Waiting for controller…", id="totals", classes="card")
-        yield Label("CONTROLLER  ·  控制器", classes="section-title")
-        yield Static("Connecting…", id="controller-info", classes="card")
-        with Horizontal(classes="toolbar"):
-            yield Label("运行模式", classes="toolbar-label")
-            yield Select(
-                [("Rule · 规则", "rule"), ("Global · 全局", "global"), ("Direct · 直连", "direct")],
-                value="rule",
-                allow_blank=False,
-                id="mode",
-            )
-            yield Button("应用模式", id="apply-mode", variant="primary")
-        yield Static(
-            "[b]1[/b] 总览   [b]2[/b] 代理   [b]3[/b] 连接   [b]4[/b] 日志\n"
-            "[b]Tab[/b] 切换焦点 · [b]↑↓ / j k[/b] 导航 · [b]/[/b] 搜索 · [b]r[/b] 刷新\n"
-            "[b]?[/b] 帮助 · [b]q / Ctrl+C[/b] 退出\n\n"
-            "速率由内核推送；曲线保存最近 180 个样本。总量是内核统计，不是本次界面会话累计。\n"
-            "代理切换不迁移已有连接；需要时在连接页显式关闭。",
-            classes="card help-card",
-        )
-
-    def on_mount(self) -> None:
-        self._mode_seen: str | None = None
-
-    def render_state(self, state: DashboardState, endpoint: str) -> None:
-        self.query_one("#download-rate", Static).update(size(state.down, rate=True))
-        self.query_one("#upload-rate", Static).update(size(state.up, rate=True))
-        self.query_one("#download-chart", Sparkline).data = list(state.down_history)
-        self.query_one("#upload-chart", Sparkline).data = list(state.up_history)
-        downloaded = size(state.download_total) if state.download_total is not None else "—"
-        uploaded = size(state.upload_total) if state.upload_total is not None else "—"
-        memory = size(state.memory) if state.memory is not None else "—"
-        self.query_one("#totals", Static).update(
-            Text(
-                f"累计下载  {downloaded}     累计上传  {uploaded}\n"
-                f"活跃连接  {len(state.connections)}     内存  {memory}"
-            )
-        )
-        mode = str(state.configs.get("mode", "—")).lower()
-        self.query_one("#controller-info", Static).update(
-            Text(
-                display_text(
-                    f"{endpoint}\nMihomo {state.version}   ·   当前模式 {mode}"
-                    f"   ·   代理组 {len(state.groups)}   ·   节点/组 {len(state.proxies)}"
-                )
-            )
-        )
-        if mode != self._mode_seen and mode in {"rule", "global", "direct"}:
-            self.query_one("#mode", Select).value = mode
-            self._mode_seen = mode
-
-    @on(Button.Pressed, "#apply-mode")
-    def apply_mode(self) -> None:
-        self.post_message(Command("mode", str(self.query_one("#mode", Select).value)))
 
 
 class Proxies(Vertical):

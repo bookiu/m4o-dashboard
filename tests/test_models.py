@@ -41,7 +41,8 @@ def test_old_traffic_totals_null_connections_and_bounds():
     assert state.download_total == 99
     for i in range(300):
         state.update_traffic({"up": i, "down": i * 2})
-    assert len(state.up_history) == 180
+    assert len(state.traffic) == 180
+    assert state.traffic[-1].down == 598
     state.update_traffic({"up": 0, "down": 0, "upTotal": 1, "downTotal": 2})
     assert state.upload_total == 1  # Kernel restart can reset cumulative counters.
     with pytest.raises(ValueError):

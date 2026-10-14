@@ -124,6 +124,40 @@ class LogEntry:
         )
 
 
+@dataclass(frozen=True)
+class Rule:
+    index: int
+    kind: str
+    payload: str
+    proxy: str
+
+    @classmethod
+    def parse(cls, index: int, raw: dict) -> Rule:
+        kind = str(raw.get("type", "Unknown"))
+        kind = {
+            "GeoIP": "GEOIP",
+            "IPCIDR": "IP-CIDR",
+            "IPCIDR6": "IP-CIDR6",
+        }.get(kind, re.sub(r"(?<=[a-z])(?=[A-Z])", "-", kind).upper())
+        return cls(index, kind, str(raw.get("payload") or "*"), str(raw.get("proxy", "—")))
+
+    def matches(self, query: str) -> bool:
+        return query.casefold() in f"{self.kind} {self.payload} {self.proxy}".casefold()
+
+
+@dataclass(frozen=True)
+class TrafficSample:
+    time: float
+    up: float
+    down: float
+
+
+CONFIG_CHOICES = {
+    "log-level": ("silent", "error", "warning", "info", "debug"),
+    "find-process-mode": ("always", "strict", "off"),
+}
+
+
 @dataclass
 class DashboardState:
     max_logs: int = 5000
@@ -136,8 +170,9 @@ class DashboardState:
     upload_total: float | None = None
     download_total: float | None = None
     memory: float | None = None
-    up_history: deque[float] = field(default_factory=lambda: deque([0], maxlen=180))
-    down_history: deque[float] = field(default_factory=lambda: deque([0], maxlen=180))
+    traffic: deque[TrafficSample] = field(default_factory=lambda: deque(maxlen=180))
+    rules: list[Rule] | None = None
+    rules_error: str = ""
     logs: deque[LogEntry] = field(init=False)
     logs_seen: int = 0
     last_connection_time: float | None = None
@@ -159,12 +194,17 @@ class DashboardState:
             if isinstance(value.get("all"), list)
         }
 
-    def update_traffic(self, value: dict) -> None:
+    def update_rules(self, value: list[dict]) -> None:
+        self.rules = [Rule.parse(index, raw) for index, raw in enumerate(value, start=1)]
+        self.rules_error = ""
+
+    def update_traffic(self, value: dict, now: float | None = None) -> None:
         if "up" not in value or "down" not in value:
             raise ValueError("Missing traffic counters")
         self.up, self.down = number(value["up"]), number(value["down"])
-        self.up_history.append(self.up)
-        self.down_history.append(self.down)
+        self.traffic.append(
+            TrafficSample(time.monotonic() if now is None else now, self.up, self.down)
+        )
         # Older kernels only have up/down; /connections supplies cumulative totals.
         if "upTotal" in value:
             self.upload_total = number(value["upTotal"])

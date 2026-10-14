@@ -26,6 +26,13 @@ class DemoServer:
         self.ticker: asyncio.Task | None = None
         self.tick = 0
         self.mode = "rule"
+        self.config_values = {
+            "mixed-port": 7890,
+            "allow-lan": False,
+            "ipv6": True,
+            "log-level": "info",
+            "find-process-mode": "strict",
+        }
         self.up = 128_000
         self.down = 2_048_000
         self.upload_total = 12_000_000
@@ -60,6 +67,14 @@ class DemoServer:
                 "负载均衡": {"name": "负载均衡", "type": "LoadBalance", "all": self.nodes[:3]},
             }
         )
+        self.rules = [
+            {"type": "DomainSuffix", "payload": "github.com", "proxy": self.group},
+            {"type": "RuleSet", "payload": "ads", "proxy": "REJECT"},
+            {"type": "GeoIP", "payload": "CN", "proxy": "DIRECT"},
+            {"type": "IPCIDR", "payload": "192.168.0.0/16", "proxy": "DIRECT"},
+            {"type": "DomainSuffix", "payload": "example.org", "proxy": self.group},
+            {"type": "Match", "payload": "", "proxy": self.group},
+        ]
         self.connections = {
             f"demo-{index:04d}": {
                 "id": f"demo-{index:04d}",
@@ -98,6 +113,7 @@ class DemoServer:
                 web.get("/configs", self.configs),
                 web.patch("/configs", self.configs),
                 web.get("/proxies", self.list_proxies),
+                web.get("/rules", self.list_rules),
                 web.get("/proxies/{name}/delay", self.delay),
                 web.get("/proxies/{name}", self.proxy),
                 web.put("/proxies/{name}", self.proxy),
@@ -149,11 +165,16 @@ class DemoServer:
         if request.method == "PATCH":
             data = await request.json()
             self.calls.append(("PATCH", request.raw_path, data))
-            if data.get("mode") not in {"rule", "global", "direct"}:
-                raise web.HTTPBadRequest()
-            self.mode = data["mode"]
+            if "mode" in data:
+                if data["mode"] not in {"rule", "global", "direct"}:
+                    raise web.HTTPBadRequest()
+                self.mode = data["mode"]
+            self.config_values.update({key: value for key, value in data.items() if key != "mode"})
             return web.Response(status=204)
-        return web.json_response({"mode": self.mode, "log-level": "debug", "mixed-port": 7890})
+        return web.json_response({"mode": self.mode, **self.config_values})
+
+    async def list_rules(self, request: web.Request) -> web.Response:
+        return web.json_response({"rules": self.rules})
 
     async def list_proxies(self, request: web.Request) -> web.Response:
         return web.json_response({"proxies": self.proxies})

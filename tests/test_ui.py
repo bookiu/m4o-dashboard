@@ -1,6 +1,5 @@
-import asyncio
-
 import pytest
+from conftest import eventually
 from rich.cells import get_character_cell_size
 from textual.app import App
 from textual.widgets import Button, DataTable, Input, RichLog, Select, Static, TabbedContent
@@ -17,22 +16,6 @@ from m4o_dashboard.ui import (
     selected_key,
     sync_table,
 )
-
-
-async def eventually(predicate):
-    async with asyncio.timeout(4):
-        # Textual and the remote fixture expose state, not a shared asyncio.Event.
-        while not predicate():  # noqa: ASYNC110
-            await asyncio.sleep(0.03)
-
-
-@pytest.fixture
-async def dashboard(demo):
-    app = Dashboard(Settings(url=demo.url, secret=demo.secret, refresh_interval=1))
-    async with app.run_test(size=(120, 36), notifications=True) as pilot:
-        await eventually(lambda: all(value[0] for value in app.statuses.values()))
-        await pilot.pause()
-        yield app, pilot
 
 
 async def test_initial_state_page_keys_search_and_modals(dashboard):
@@ -106,7 +89,7 @@ async def test_proxy_switch_notification_renders_literal_node_name(dashboard, de
     assert toast.render().plain == "完成\n已切换至 ✈\ufe0e机场 [red]HK[/red]（已有连接保持不变）"
     assert app.state.proxies[demo.group]["now"] == node
     await pilot.resize_terminal(100, 30)
-    await pilot.press("3")
+    await pilot.press("4")
     assert app.current_page() == "connections"
 
 
@@ -141,8 +124,7 @@ async def test_mouse_tabs_node_button_and_mode_change(dashboard, demo):
     await eventually(lambda: not app._mutation_busy)
     app.clear_notifications()
     await pilot.press("1")
-    app.query_one("#mode", Select).value = "global"
-    await pilot.click("#apply-mode")
+    await pilot.click("#mode-global")
     await eventually(lambda: demo.mode == "global")
     await eventually(lambda: not app._mutation_busy)
     assert app.state.configs["mode"] == "global"
@@ -150,7 +132,7 @@ async def test_mouse_tabs_node_button_and_mode_change(dashboard, demo):
 
 async def test_connections_filter_sort_detail_and_destructive_confirmation(dashboard, demo):
     app, pilot = dashboard
-    await pilot.press("3")
+    await pilot.press("4")
     table = app.query_one("#connections-table", DataTable)
     table.move_cursor(row=2)
     key = selected_key(table)
@@ -183,7 +165,7 @@ async def test_connections_filter_sort_detail_and_destructive_confirmation(dashb
 
 async def test_logs_filter_pause_resume_and_clear(dashboard):
     app, pilot = dashboard
-    await pilot.press("4")
+    await pilot.press("5")
     panel = app.query_one(Logs)
     output = app.query_one("#log-output", RichLog)
     await eventually(lambda: bool(output.lines))
@@ -208,7 +190,7 @@ async def test_logs_filter_pause_resume_and_clear(dashboard):
 
 async def test_incremental_rows_preserve_key_and_scroll(dashboard):
     app, pilot = dashboard
-    await pilot.press("3")
+    await pilot.press("4")
     table = app.query_one("#connections-table", DataTable)
     table.move_cursor(row=10)
     key = selected_key(table)
@@ -276,7 +258,7 @@ async def test_emoji_logs_and_details_use_text_presentation_without_changing_sta
     app, pilot = dashboard
     message = "emoji-rule ☁\ufe0f云 [red]"
     app.state.add_log({"payload": message})
-    await pilot.press("4")
+    await pilot.press("5")
     app.query_one("#log-search", Input).value = "emoji-rule"
     await pilot.pause()
     output = app.query_one("#log-output", RichLog)
@@ -298,13 +280,14 @@ async def test_demo_resize_and_clean_shutdown(terminal_size):
     async with app.run_test(size=terminal_size) as pilot:
         await eventually(lambda: all(value[0] for value in app.statuses.values()))
         client = app.client
-        for page in ("1", "2", "3", "4"):
+        for page in ("1", "2", "3", "4", "5", "6"):
             await pilot.press(page)
             await pilot.pause()
             if page == "1":
                 # Focusing the mode selector used to scroll the traffic cards off screen.
                 rate = app.query_one("#download-rate")
                 assert 4 <= rate.region.y < terminal_size[1] - 1
+        await pilot.press("escape", "5")
         for identifier in ("#log-search", "#pause-logs", "#clear-logs"):
             widget = app.query_one(identifier)
             assert widget.region.right <= terminal_size[0]
@@ -333,7 +316,7 @@ async def test_auth_failure_stays_interactive_and_redacts_secret(demo):
 
 async def test_large_log_burst_is_bounded(dashboard):
     app, pilot = dashboard
-    await pilot.press("4")
+    await pilot.press("5")
     logs = app.query_one(Logs)
     logs.state = DashboardState(max_logs=100)
     logs.last_seen = 0

@@ -31,16 +31,16 @@ def test_cli_in_real_terminal_restores_terminal_settings():
             start_new_session=True,
         )
         started = time.monotonic()
-        sent = False
+        keys = [(2, b"23456"), (3, b"\x1b"), (3.3, b"1q")]
         while process.poll() is None and time.monotonic() - started < 12:
-            if not sent and time.monotonic() - started > 2:
-                os.write(master, b"2341q")
-                sent = True
+            if keys and time.monotonic() - started > keys[0][0]:
+                os.write(master, keys.pop(0)[1])
             ready, _, _ = select.select([master], [], [], 0.1)
             if ready:
                 output.extend(os.read(master, 65536))
         assert process.wait(timeout=2) == 0, output.decode(errors="replace")[-2000:]
-        assert b"M4O" in output
+        assert b"mihomo" in output
+        assert b"mixed-port" in output
         assert b"Traceback" not in output
         assert termios.tcgetattr(slave) == original
     finally:

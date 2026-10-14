@@ -9,6 +9,9 @@ __pycache__/
 htmlcov/
 dist/
 build/
+.audit/
+.herdr-web-ui/
+screenshots/
 *.egg-info/
 .env
 .env.*

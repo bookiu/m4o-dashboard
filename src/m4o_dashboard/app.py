@@ -3,33 +3,40 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import AsyncExitStack
 from dataclasses import replace
 
 from rich.text import Text
-from textual import on, work
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import DataTable, Footer, Header, Input, Static, TabbedContent, TabPane
+from textual.widget import Widget
+from textual.widgets import DataTable, Input, Static, TabbedContent, TabPane
 from textual.worker import Worker, WorkerState
 
 from .api import APIError, MihomoClient
 from .config import Settings
-from .models import DashboardState
-from .ui import Command, Confirm, Connections, Information, Logs, Overview, Proxies, display_text
+from .models import DashboardState, size
+from .overview import Overview, RouteControl
+from .panels import KernelConfig, Rules
+from .theme import CYAN, DASHBOARD_THEME, FOREGROUND, GREEN, MUTED
+from .ui import Command, Confirm, Connections, Information, Logs, Proxies, display_text
 
 HELP = """M4O · Mihomo terminal dashboard
 
-1 / 2 / 3 / 4    总览 / 代理 / 连接 / 日志
+1 / 2 / 3 / 4 / 5 / 6    概览 / 代理组 / 规则 / 连接 / 日志 / 全局配置
 Tab / Shift+Tab 切换焦点
 ↑ ↓ / j k       表格导航；← → / 滚轮：滚动
 Enter           打开组的节点列表 / 使用选中节点 / 查看连接详情
 /               聚焦当前页面搜索框
 Esc             离开搜索框 / 取消弹窗
-r               刷新配置、版本、代理列表
-t               代理页：测试选中节点延迟（非带宽测速）
-Delete          连接页：确认后关闭选中连接
-Space           日志页：暂停 / 恢复绘制（后台仍接收）
+r               刷新配置、版本、代理和规则列表
+t               概览 / 代理页：测试选中节点延迟（非带宽测速）
+m               概览 / 代理页：切换 rule / global / direct 模式
+Delete / d      连接表格：确认后关闭选中连接
+Space           概览 / 日志页：暂停 / 恢复日志绘制（后台仍接收）
+Ctrl+S          全局配置：应用更改；Esc 还原未提交的修改
 End             日志输出获得焦点时：滚到最新日志
 ?               本帮助
 q / Ctrl+C      退出
@@ -51,14 +58,17 @@ class Dashboard(App[None]):
     CSS_PATH = "dashboard.tcss"
     AUTO_FOCUS = "#overview-view"
     BINDINGS = [
-        Binding("1", "page('overview')", "总览"),
-        Binding("2", "page('proxies')", "代理"),
-        Binding("3", "page('connections')", "连接"),
-        Binding("4", "page('logs')", "日志"),
+        Binding("1", "page('overview')", "概览"),
+        Binding("2", "page('proxies')", "代理组"),
+        Binding("3", "page('rules')", "规则"),
+        Binding("4", "page('connections')", "连接"),
+        Binding("5", "page('logs')", "日志"),
+        Binding("6", "page('config')", "全局配置"),
         Binding("slash", "search", "搜索", key_display="/"),
         Binding("r", "refresh", "刷新"),
         Binding("t", "test_delay", show=False),
-        Binding("delete", "close_connection", show=False),
+        Binding("delete,d", "close_connection", show=False),
+        Binding("m", "cycle_mode", show=False),
         Binding("space", "pause_logs", show=False),
         Binding("escape", "escape_search", show=False),
         Binding("question_mark", "help", "帮助", key_display="?"),
@@ -67,6 +77,11 @@ class Dashboard(App[None]):
 
     def __init__(self, settings: Settings, *, demo: bool = False) -> None:
         super().__init__()
+        self.register_theme(DASHBOARD_THEME)
+        self.theme = "m4o"
+        self._started = time.monotonic()
+        self._header_second = -1
+        self._config_focus: Widget | None = None
         self.settings = settings
         self.demo = demo
         self.state = DashboardState(max_logs=settings.max_logs)
@@ -74,30 +89,38 @@ class Dashboard(App[None]):
         self.statuses = {
             name: (False, "connecting…") for name in ("http", "traffic", "connections", "logs")
         }
-        self._dirty = {"overview", "proxies", "connections", "logs", "status"}
+        self._dirty = {"overview", "proxies", "rules", "connections", "logs", "config", "status"}
         self._refresh_event = asyncio.Event()
         self._refresh_lock = asyncio.Lock()
         self._mutation_busy = False
         self._activity = ""
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        yield Static("Connecting to mihomo…", id="network-status", markup=False)
+        yield Static("mihomo / dashboard · 正在连接…", id="network-status", markup=False)
         with TabbedContent(initial="overview", id="pages"):
-            with TabPane("1 总览", id="overview"):
-                yield Overview(id="overview-view")
-            with TabPane("2 代理", id="proxies"):
+            with TabPane("1 概览", id="overview"):
+                yield Overview(self.state, id="overview-view")
+            with TabPane("2 代理组", id="proxies"):
                 yield Proxies(self.state, id="proxies-view")
-            with TabPane("3 连接", id="connections"):
+            with TabPane("3 规则", id="rules"):
+                yield Rules(self.state, id="rules-view")
+            with TabPane("4 连接", id="connections"):
                 yield Connections(self.state, id="connections-view")
-            with TabPane("4 日志", id="logs"):
+            with TabPane("5 日志", id="logs"):
                 yield Logs(self.state, id="logs-view")
-        yield Footer()
+            with TabPane("6 全局配置", id="config"):
+                yield KernelConfig(self.state, id="config-view")
+        yield Static(id="dashboard-footer", markup=False)
 
     def on_mount(self) -> None:
-        self.theme = "textual-dark"
+        self.screen.set_class(self.size.width < 100, "narrow")
         self.set_interval(0.25, self.flush_ui)
         self.network()
+
+    def on_resize(self, event: events.Resize) -> None:
+        if self.screen_stack:
+            self.screen_stack[0].set_class(event.size.width < 100, "narrow")
+            self._dirty.update(("overview", "status"))
 
     def set_status(self, name: str, connected: bool, detail: str) -> None:
         value = (connected, detail)
@@ -147,7 +170,12 @@ class Dashboard(App[None]):
             version, configs, proxies = await self.client.snapshot()
             self.state.update_snapshot(version, configs, proxies)
             self.set_status("http", True, "live")
-            self._dirty.update(("overview", "proxies"))
+            self._dirty.update(("overview", "proxies", "config"))
+            try:
+                self.state.update_rules(await self.client.rules())
+            except APIError as exc:
+                self.state.rules_error = str(exc)
+            self._dirty.update(("overview", "rules"))
 
     async def poll(self) -> None:
         while True:
@@ -183,7 +211,7 @@ class Dashboard(App[None]):
                     self._dirty.update(("overview", "connections"))
                 else:
                     self.state.add_log(value, self.settings.secret)
-                    self._dirty.add("logs")
+                    self._dirty.update(("overview", "logs"))
             except (ValueError, TypeError, KeyError):
                 self.set_status(name, False, "invalid data; waiting for next update")
             frames += 1
@@ -198,34 +226,71 @@ class Dashboard(App[None]):
         # ModalScreen's query scope differs; query the underlying default screen.
         screen = self.screen_stack[0]
         pages = screen.query_one("#pages", TabbedContent)
-        if "status" in self._dirty:
-            line = Text(" DEMO  " if self.demo else " ", style="bold cyan")
-            failed = []
-            for name, (connected, detail) in self.statuses.items():
+        elapsed = int(time.monotonic() - self._started)
+        if "status" in self._dirty or elapsed != self._header_second:
+            self._header_second = elapsed
+            width = max(1, self.size.width - 6)
+            connected = all(status[0] for status in self.statuses.values())
+            line = Text("mihomo", style=f"bold {CYAN}")
+            line.append(" / dashboard  │  ", style=FOREGROUND)
+            line.append(
+                "● 已连接" if connected else "○ 连接中 / 断流",
+                style=GREEN if connected else "yellow",
+            )
+            endpoint = self.settings.url.removeprefix("http://").removeprefix("https://")
+            line.append(f"  {display_text(endpoint)}", style=FOREGROUND)
+            if width >= 100:
                 line.append(
-                    f"{'●' if connected else '○'} {name.upper()}  ",
-                    style="green" if connected else "yellow",
+                    f"  运行 {elapsed // 3600:02}:{elapsed // 60 % 60:02}:{elapsed % 60:02}",
+                    style=FOREGROUND,
                 )
-                if not connected:
-                    failed.append(f"{name}: {detail}")
-            if self._activity:
-                line.append(f"  {self._activity}", style="cyan")
+            right = Text(
+                f"内核 {display_text(self.state.version)}   "
+                + ("DEMO DATA" if self.demo else "LIVE DATA"),
+                style=MUTED,
+            )
+            if line.cell_len + right.cell_len + 2 < width:
+                line.append(" " * (width - line.cell_len - right.cell_len))
+                line.append(right)
+            line.truncate(width, overflow="ellipsis")
+            failed = [f"{name}: {detail}" for name, (ok, detail) in self.statuses.items() if not ok]
             if failed:
                 line.append(
-                    "\n " + display_text(failed[0]) + " · 保留最后数据 / 自动重试", style="yellow"
+                    "\n" + display_text(failed[0]) + " · 保留最后数据 / 自动重试", style="yellow"
                 )
+            if self._activity:
+                line.append("\n" + self._activity, style=CYAN)
             if not self.settings.verify_tls:
-                line.append("\n TLS verification DISABLED", style="bold red")
-            screen.query_one("#network-status", Static).update(line)
+                line.append("\nTLS verification DISABLED", style="bold red")
+            header = screen.query_one("#network-status", Static)
+            header.update(line)
+            header.tooltip = Text(
+                "\n".join(
+                    display_text(f"{name}: {detail}") for name, (_, detail) in self.statuses.items()
+                )
+            )
+            left = "Tab 切换区域   ↑↓ 选择   Enter 确认   / 搜索   ? 帮助   q 退出"
+            if self.size.width < 100:
+                left = "1–6 页面  Tab 焦点  / 搜索  ? 帮助  q 退出"
+            footer = Text(left, style=FOREGROUND)
+            memory = size(self.state.memory) if self.state.memory is not None else "—"
+            right = Text(f"{self.settings.interval / 1000:g}s 连接刷新 · {memory}", style=MUTED)
+            if width > footer.cell_len + right.cell_len + 2:
+                footer.append(" " * (width - footer.cell_len - right.cell_len))
+                footer.append(right)
+            screen.query_one("#dashboard-footer", Static).update(footer)
             self._dirty.discard("status")
         active = pages.active
         if active in self._dirty:
-            if active == "overview":
-                screen.query_one(Overview).render_state(self.state, self.settings.url)
-            elif active == "proxies":
-                screen.query_one(Proxies).render_state()
-            elif active == "connections":
-                screen.query_one(Connections).render_state()
+            view = {
+                "overview": Overview,
+                "proxies": Proxies,
+                "rules": Rules,
+                "connections": Connections,
+                "config": KernelConfig,
+            }.get(active)
+            if view:
+                screen.query_one(view).render_state()
             self._dirty.discard(active)
         if active == "logs":
             # Also check while manually paused/scrolled back, so End can resume.
@@ -243,6 +308,7 @@ class Dashboard(App[None]):
             "search",
             "refresh",
             "test_delay",
+            "cycle_mode",
             "close_connection",
             "pause_logs",
             "escape_search",
@@ -263,8 +329,10 @@ class Dashboard(App[None]):
         target = {
             "overview": "#overview-view",
             "proxies": "#groups",
+            "rules": "#rules-table",
             "connections": "#connections-table",
             "logs": "#log-output",
+            "config": "#config-mixed-port",
         }[page]
         self.query_one(target).focus()
         if page == "overview":
@@ -273,10 +341,16 @@ class Dashboard(App[None]):
     def action_search(self) -> None:
         page = self.current_page()
         if page == "overview":
-            self.action_page("proxies")
-            page = "proxies"
+            focused_id = self.focused.id if self.focused else ""
+            page = {"overview-connections": "connections", "overview-rules": "rules"}.get(
+                focused_id, "proxies"
+            )
+            self.action_page(page)
+        if page == "config":
+            return
         identifier = {
             "proxies": "proxy-search",
+            "rules": "rule-search",
             "connections": "connection-search",
             "logs": "log-search",
         }[page]
@@ -286,6 +360,7 @@ class Dashboard(App[None]):
         if isinstance(self.focused, Input):
             target = {
                 "proxies": "#nodes",
+                "rules": "#rules-table",
                 "connections": "#connections-table",
                 "logs": "#log-output",
             }.get(self.current_page())
@@ -298,14 +373,29 @@ class Dashboard(App[None]):
     def action_test_delay(self) -> None:
         if self.current_page() == "proxies":
             self.query_one(Proxies).test_node()
+        elif self.current_page() == "overview":
+            self.query_one(RouteControl).test_node()
+
+    def action_cycle_mode(self) -> None:
+        if self.current_page() in {"overview", "proxies"}:
+            modes = ("rule", "global", "direct")
+            current = self.state.configs.get("mode", "rule")
+            index = modes.index(current) if current in modes else -1
+            self.start_mutation("mode", (modes[(index + 1) % len(modes)],))
 
     def action_close_connection(self) -> None:
         if self.current_page() == "connections" and isinstance(self.focused, DataTable):
             self.query_one(Connections).close_selected()
+        elif self.current_page() == "overview" and self.focused is self.query_one(
+            "#overview-connections"
+        ):
+            self.query_one(Overview).close_selected()
 
     def action_pause_logs(self) -> None:
         if self.current_page() == "logs":
             self.query_one(Logs).toggle_pause()
+        elif self.current_page() == "overview":
+            self.query_one(Overview).toggle_logs()
 
     def action_help(self) -> None:
         self.push_screen(Information("键盘 / 鼠标操作", HELP))
@@ -313,7 +403,14 @@ class Dashboard(App[None]):
     @on(Command)
     def command(self, event: Command) -> None:
         action, args = event.action, event.args
-        if action == "detail":
+        if action == "page":
+            self.action_page(args[0])
+        elif action == "search":
+            self.action_page(args[0])
+            self.action_search()
+        elif action == "refresh":
+            self.action_refresh()
+        elif action == "detail":
             connection = self.state.connections.get(args[0])
             if connection:
                 self.push_screen(Information("连接详情", connection.raw))
@@ -334,9 +431,15 @@ class Dashboard(App[None]):
                 lambda confirmed: self.start_mutation(action, args) if confirmed else None,
             )
         else:
-            self.start_mutation(action, args)
+            self.start_mutation(action, args, changes=event.changes)
 
-    def start_mutation(self, action: str, args: tuple[str, ...]) -> None:
+    def start_mutation(
+        self,
+        action: str,
+        args: tuple[str, ...],
+        *,
+        changes: dict[str, str | int | bool] | None = None,
+    ) -> None:
         if self._mutation_busy:
             self.notify("已有操作进行中，请稍候", severity="warning")
             return
@@ -346,10 +449,19 @@ class Dashboard(App[None]):
         self._mutation_busy = True
         self._activity = f"正在执行 {action}…"
         self._dirty.add("status")
-        self.mutate(action, args)
+        if action == "config":
+            self._config_focus = self.focused
+            self.screen_stack[0].query_one(KernelConfig).disabled = True
+        self.mutate(action, args, changes=changes)
 
     @work(group="mutations", exit_on_error=False)
-    async def mutate(self, action: str, args: tuple[str, ...]) -> None:
+    async def mutate(
+        self,
+        action: str,
+        args: tuple[str, ...],
+        *,
+        changes: dict[str, str | int | bool] | None = None,
+    ) -> None:
         try:
             client = self.client
             if client is None:
@@ -373,6 +485,9 @@ class Dashboard(App[None]):
             elif action == "mode":
                 await client.set_mode(args[0])
                 message = f"模式已更新为 {args[0]}"
+            elif action == "config":
+                await client.update_configs(changes or {})
+                message = "全局配置已更新"
             elif action in {"close", "close-all"}:
                 await client.close_connection(args[0] if action == "close" else None)
                 message = "已请求关闭连接"
@@ -387,6 +502,8 @@ class Dashboard(App[None]):
             self.notify(display_text(message), title="完成", markup=False)
             try:
                 await self.refresh_snapshot()
+                if action == "config":
+                    self.screen_stack[0].query_one(KernelConfig).restore()
             except APIError as exc:
                 self.set_status("http", False, str(exc))
                 self.notify("操作已提交；刷新暂时失败，等待重试", severity="warning")
@@ -400,7 +517,13 @@ class Dashboard(App[None]):
         finally:
             self._mutation_busy = False
             self._activity = ""
-            self._dirty.update(("proxies", "status"))
+            if action == "config":
+                self.screen_stack[0].query_one(KernelConfig).disabled = False
+                if self.current_page() == "config" and len(self.screen_stack) == 1:
+                    if self._config_focus is not None:
+                        self._config_focus.focus()
+                self._config_focus = None
+            self._dirty.update(("overview", "proxies", "config", "status"))
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         if event.state == WorkerState.ERROR:
