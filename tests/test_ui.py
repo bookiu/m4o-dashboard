@@ -2,16 +2,16 @@ import pytest
 from conftest import eventually
 from rich.cells import get_character_cell_size
 from textual.app import App
-from textual.widgets import Button, DataTable, Input, RichLog, Select, Static, TabbedContent
+from textual.widgets import Button, DataTable, Input, Select, Static, TabbedContent
 
 from m4o_dashboard.app import Dashboard
 from m4o_dashboard.config import Settings
+from m4o_dashboard.logs import Logs
 from m4o_dashboard.models import DashboardState
+from m4o_dashboard.proxies import Proxies
 from m4o_dashboard.ui import (
     Confirm,
     Information,
-    Logs,
-    Proxies,
     add_columns,
     selected_key,
     sync_table,
@@ -26,7 +26,7 @@ async def test_initial_state_page_keys_search_and_modals(dashboard):
     assert 0 < app.query_one("#download-rate").region.y < 20
     await pilot.press("2")
     assert app.query_one("#pages", TabbedContent).active == "proxies"
-    assert app.query_one("#groups", DataTable).row_count == 3
+    assert app.query_one("#groups", DataTable).row_count == 5
     await pilot.press("/")
     assert app.query_one("#proxy-search", Input).has_focus
     await pilot.press("r", "q", "1", "2", "3")
@@ -62,6 +62,8 @@ async def test_keyboard_proxy_switch_delay_and_automatic_group(dashboard, demo):
     await eventually(lambda: demo.proxies["自动选择"]["fixed"] != "")
     await eventually(lambda: not app._mutation_busy)
     app.clear_notifications()
+    app.query_one("#unpin-node").scroll_visible(animate=False)
+    await pilot.pause()
     await pilot.click("#unpin-node")
     await eventually(lambda: demo.proxies["自动选择"]["fixed"] == "")
     await eventually(lambda: not app._mutation_busy)
@@ -118,7 +120,9 @@ async def test_mouse_tabs_node_button_and_mode_change(dashboard, demo):
     await pilot.pause()
     assert app.current_page() == "proxies"
     # Actual cell click, then button click: no programmatic command invocation.
-    await pilot.click("#nodes", offset=(5, 3))
+    await pilot.click("#nodes", offset=(5, 2))
+    app.query_one("#use-node").scroll_visible(animate=False)
+    await pilot.pause()
     await pilot.click("#use-node")
     await eventually(lambda: demo.proxies[demo.group]["now"] == demo.nodes[1])
     await eventually(lambda: not app._mutation_busy)
@@ -155,6 +159,8 @@ async def test_connections_filter_sort_detail_and_destructive_confirmation(dashb
     app.query_one("#connection-search", Input).value = "firefox"
     await pilot.pause()
     assert 0 < table.row_count < len(demo.connections)
+    app.query_one("#close-all").scroll_visible(animate=False)
+    await pilot.pause()
     await pilot.click("#close-all")
     assert isinstance(app.screen, Confirm)
     await pilot.click("#confirm")
@@ -167,8 +173,8 @@ async def test_logs_filter_pause_resume_and_clear(dashboard):
     app, pilot = dashboard
     await pilot.press("5")
     panel = app.query_one(Logs)
-    output = app.query_one("#log-output", RichLog)
-    await eventually(lambda: bool(output.lines))
+    output = app.query_one("#log-output", DataTable)
+    await eventually(lambda: bool(output.row_count))
     await pilot.press("space")
     assert panel.paused
     old_seen = panel.last_seen
@@ -180,11 +186,17 @@ async def test_logs_filter_pause_resume_and_clear(dashboard):
     await pilot.click("#pause-logs")
     await pilot.pause()
     assert not panel.paused
-    assert "unique failure token" in "\n".join(line.text for line in output.lines)
-    assert "[TCP]" not in "\n".join(line.text for line in output.lines)
+    assert "unique failure token" in "\n".join(
+        output.get_row_at(i)[2].__rich__().plain for i in range(output.row_count)
+    )
+    assert "[TCP]" not in "\n".join(
+        output.get_row_at(i)[2].__rich__().plain for i in range(output.row_count)
+    )
     await pilot.click("#clear-logs")
     await pilot.pause()
-    assert "unique failure token" not in "\n".join(line.text for line in output.lines)
+    assert "unique failure token" not in "\n".join(
+        output.get_row_at(i)[2].__rich__().plain for i in range(output.row_count)
+    )
     assert all(entry.message != "unique failure token" for entry in app.state.logs)
 
 
@@ -194,7 +206,7 @@ async def test_incremental_rows_preserve_key_and_scroll(dashboard):
     table = app.query_one("#connections-table", DataTable)
     table.move_cursor(row=10)
     key = selected_key(table)
-    rows = [(entry.id, (entry.id,) + ("changed",) * 9) for entry in app.state.connections.values()]
+    rows = [(entry.id, (entry.id,) + ("changed",) * 5) for entry in app.state.connections.values()]
     rows.reverse()
     sync_table(table, rows)
     assert selected_key(table) == key
@@ -261,8 +273,10 @@ async def test_emoji_logs_and_details_use_text_presentation_without_changing_sta
     await pilot.press("5")
     app.query_one("#log-search", Input).value = "emoji-rule"
     await pilot.pause()
-    output = app.query_one("#log-output", RichLog)
-    assert "emoji-rule ☁\ufe0e云 [red]" in "\n".join(line.text for line in output.lines)
+    output = app.query_one("#log-output", DataTable)
+    assert "emoji-rule ☁\ufe0e云 [red]" in "\n".join(
+        output.get_row_at(i)[2].__rich__().plain for i in range(output.row_count)
+    )
     assert any(entry.message == message for entry in app.state.logs)
 
     raw = {"rulePayload": message}

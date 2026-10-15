@@ -6,6 +6,7 @@ import asyncio
 import time
 from contextlib import AsyncExitStack
 from dataclasses import replace
+from pathlib import Path
 
 from rich.text import Text
 from textual import events, on, work
@@ -17,11 +18,16 @@ from textual.worker import Worker, WorkerState
 
 from .api import APIError, MihomoClient
 from .config import Settings
+from .connections import Connections
+from .kernel_config import KernelConfig
+from .kernel_file import KernelFile, KernelFileError
+from .logs import Logs
 from .models import DashboardState, size
 from .overview import Overview, RouteControl
-from .panels import KernelConfig, Rules
+from .panels import Rules
+from .proxies import Proxies
 from .theme import CYAN, DASHBOARD_THEME, FOREGROUND, GREEN, MUTED
-from .ui import Command, Confirm, Connections, Information, Logs, Proxies, display_text
+from .ui import Command, Confirm, Information, display_text
 
 HELP = """M4O · Mihomo terminal dashboard
 
@@ -32,11 +38,12 @@ Enter           打开组的节点列表 / 使用选中节点 / 查看连接详�
 /               聚焦当前页面搜索框
 Esc             离开搜索框 / 取消弹窗
 r               刷新配置、版本、代理和规则列表
-t               概览 / 代理页：测试选中节点延迟（非带宽测速）
+t               概览 / 代理页：测试节点 / 当前组延迟（非带宽测速）
 m               概览 / 代理页：切换 rule / global / direct 模式
 Delete / d      连接表格：确认后关闭选中连接
-Space           概览 / 日志页：暂停 / 恢复日志绘制（后台仍接收）
-Ctrl+S          全局配置：应用更改；Esc 还原未提交的修改
+Space           概览 / 日志页：暂停日志滚动；连接页：暂停刷新（后台仍接收）
+Ctrl+Enter      全局配置：应用到运行配置
+Ctrl+S          全局配置：保存到显式关联的本地 YAML；Esc 还原未应用的修改
 End             日志输出获得焦点时：滚到最新日志
 ?               本帮助
 q / Ctrl+C      退出
@@ -50,6 +57,8 @@ q / Ctrl+C      退出
 切换代理或模式通常只影响新连接，不会自动中断已有连接。
 内核断开时保留最后数据，状态栏标记断流，后台指数退避重连。
 日志按本地级别/关键词过滤；缓冲有上限，非持久化日志存储。
+y 复制日志；Ctrl+L 清空本地日志；l 聚焦日志级别。
+规则页 r 刷新；规则集列表获得焦点时 r 更新选中规则集。
 """
 
 
@@ -85,6 +94,11 @@ class Dashboard(App[None]):
         self.settings = settings
         self.demo = demo
         self.state = DashboardState(max_logs=settings.max_logs)
+        self.kernel_file: KernelFile | None = None
+        if demo:
+            self.state.config_name = "daily.yaml (演示)"
+        elif settings.kernel_config:
+            self.state.config_name = Path(settings.kernel_config).name
         self.client: MihomoClient | None = None
         self.statuses = {
             name: (False, "connecting…") for name in ("http", "traffic", "connections", "logs")
@@ -145,6 +159,13 @@ class Dashboard(App[None]):
                     proxy="",
                     refresh_interval=2,
                 )
+            if self.settings.kernel_config and not self.demo:
+                candidate = KernelFile(self.settings.kernel_config)
+                try:
+                    await asyncio.to_thread(candidate.load)
+                    self.kernel_file = candidate
+                except KernelFileError as exc:
+                    self.notify(str(exc), severity="error", markup=False)
             self.sub_title = ("DEMO · " if self.demo else "") + self.settings.url
             self.client = await stack.enter_async_context(
                 MihomoClient(self.settings, self.set_status)
@@ -175,6 +196,11 @@ class Dashboard(App[None]):
                 self.state.update_rules(await self.client.rules())
             except APIError as exc:
                 self.state.rules_error = str(exc)
+            try:
+                self.state.rule_providers = await self.client.rule_providers()
+                self.state.providers_error = ""
+            except APIError as exc:
+                self.state.providers_error = f"规则集读取失败，保留最后数据 · {exc}"
             self._dirty.update(("overview", "rules"))
 
     async def poll(self) -> None:
@@ -232,7 +258,15 @@ class Dashboard(App[None]):
             width = max(1, self.size.width - 6)
             connected = all(status[0] for status in self.statuses.values())
             line = Text("mihomo", style=f"bold {CYAN}")
-            line.append(" / dashboard  │  ", style=FOREGROUND)
+            titles = {
+                "overview": "概览",
+                "proxies": "代理组",
+                "rules": "规则",
+                "connections": "连接",
+                "logs": "日志",
+                "config": "全局配置",
+            }
+            line.append(f" / {titles.get(pages.active, 'dashboard')}  │  ", style=FOREGROUND)
             line.append(
                 "● 已连接" if connected else "○ 连接中 / 断流",
                 style=GREEN if connected else "yellow",
@@ -241,11 +275,11 @@ class Dashboard(App[None]):
             line.append(f"  {display_text(endpoint)}", style=FOREGROUND)
             if width >= 100:
                 line.append(
-                    f"  运行 {elapsed // 3600:02}:{elapsed // 60 % 60:02}:{elapsed % 60:02}",
+                    f"  mode: {display_text(str(self.state.configs.get('mode', '—')))}",
                     style=FOREGROUND,
                 )
             right = Text(
-                f"内核 {display_text(self.state.version)}   "
+                f"{display_text(self.state.config_name)}   "
                 + ("DEMO DATA" if self.demo else "LIVE DATA"),
                 style=MUTED,
             )
@@ -270,6 +304,14 @@ class Dashboard(App[None]):
                 )
             )
             left = "Tab 切换区域   ↑↓ 选择   Enter 确认   / 搜索   ? 帮助   q 退出"
+            hints = {
+                "proxies": "Tab 切换区域   ↑↓ 选择   Enter 应用   t 测速   / 搜索   Esc 取消",
+                "rules": "Tab 切换区域  ↑↓ 浏览  Enter 详情  / 搜索  g/G 首尾   r 更新   Esc 清除",
+                "connections": "Tab 切换区域  ↑↓ 选择  Enter 详情  / 搜索  d 关闭   Space 暂停刷新",
+                "logs": "↑↓ 选择  Enter 原文  / 搜索  l 级别   Space 滚动   y 复制   Ctrl+L 清空",
+                "config": "Tab 区域  ↑↓ 选择  Space 切换  Ctrl+Enter 应用  Ctrl+S 保存  Esc 放弃",
+            }
+            left = hints.get(pages.active, left)
             if self.size.width < 100:
                 left = "1–6 页面  Tab 焦点  / 搜索  ? 帮助  q 退出"
             footer = Text(left, style=FOREGROUND)
@@ -298,7 +340,7 @@ class Dashboard(App[None]):
 
     @on(TabbedContent.TabActivated, "#pages")
     def page_activated(self, event: TabbedContent.TabActivated) -> None:
-        self._dirty.add(event.pane.id or "overview")
+        self._dirty.update((event.pane.id or "overview", "status"))
         self.call_after_refresh(self.flush_ui)
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
@@ -324,7 +366,7 @@ class Dashboard(App[None]):
         if isinstance(self.screen, (Confirm, Information)):
             return
         self.query_one("#pages", TabbedContent).active = page
-        self._dirty.add(page)
+        self._dirty.update((page, "status"))
         self.flush_ui()
         target = {
             "overview": "#overview-view",
@@ -396,6 +438,8 @@ class Dashboard(App[None]):
             self.query_one(Logs).toggle_pause()
         elif self.current_page() == "overview":
             self.query_one(Overview).toggle_logs()
+        elif self.current_page() == "connections":
+            self.query_one(Connections).toggle_pause()
 
     def action_help(self) -> None:
         self.push_screen(Information("键盘 / 鼠标操作", HELP))
@@ -449,7 +493,7 @@ class Dashboard(App[None]):
         self._mutation_busy = True
         self._activity = f"正在执行 {action}…"
         self._dirty.add("status")
-        if action == "config":
+        if action in {"config", "config-save"}:
             self._config_focus = self.focused
             self.screen_stack[0].query_one(KernelConfig).disabled = True
         self.mutate(action, args, changes=changes)
@@ -482,11 +526,32 @@ class Dashboard(App[None]):
                 delay = await client.test_delay(args[0])
                 self.state.delays[args[0]] = delay
                 message = f"{args[0]}: {delay} ms"
+            elif action == "group-delay":
+                self.state.delays.update(await client.test_group(args[0]))
+                message = "当前组延迟测试完成"
+            elif action == "provider-update":
+                if args[0] not in self.state.rule_providers:
+                    raise APIError("规则集已不存在，请刷新")
+                await client.update_rule_provider(args[0])
+                message = f"已更新规则集 {args[0]}"
+            elif action == "config-save":
+                if self.demo:
+                    pass  # Demo persistence is deliberately memory-only.
+                elif self.kernel_file is not None:
+                    await asyncio.to_thread(self.kernel_file.save, changes or {})
+                else:
+                    raise APIError("未关联本地 YAML 配置文件")
+                self.screen_stack[0].query_one(KernelConfig).saved()
+                self.notify(
+                    "配置文件已保存" if not self.demo else "演示配置已模拟保存", markup=False
+                )
+                return
             elif action == "mode":
                 await client.set_mode(args[0])
                 message = f"模式已更新为 {args[0]}"
             elif action == "config":
                 await client.update_configs(changes or {})
+                self.screen_stack[0].query_one(KernelConfig).applied(changes or {})
                 message = "全局配置已更新"
             elif action in {"close", "close-all"}:
                 await client.close_connection(args[0] if action == "close" else None)
@@ -502,13 +567,13 @@ class Dashboard(App[None]):
             self.notify(display_text(message), title="完成", markup=False)
             try:
                 await self.refresh_snapshot()
-                if action == "config":
+                if action in {"config", "config-save"}:
                     self.screen_stack[0].query_one(KernelConfig).restore()
             except APIError as exc:
                 self.set_status("http", False, str(exc))
                 self.notify("操作已提交；刷新暂时失败，等待重试", severity="warning")
                 self._refresh_event.set()
-        except APIError as exc:
+        except (APIError, KernelFileError) as exc:
             if action == "delay":
                 self.state.delays[args[0]] = None
             self.notify(
@@ -517,7 +582,7 @@ class Dashboard(App[None]):
         finally:
             self._mutation_busy = False
             self._activity = ""
-            if action == "config":
+            if action in {"config", "config-save"}:
                 self.screen_stack[0].query_one(KernelConfig).disabled = False
                 if self.current_page() == "config" and len(self.screen_stack) == 1:
                     if self._config_focus is not None:

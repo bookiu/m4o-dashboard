@@ -18,7 +18,7 @@ import aiohttp
 from yarl import URL
 
 from .config import Settings
-from .models import CONFIG_CHOICES
+from .models import CONFIG_CHOICES, CONFIG_PORTS
 
 StatusCallback = Callable[[str, bool, str], None]
 
@@ -132,9 +132,44 @@ class MihomoClient:
             raise APIError("Invalid rule list from controller")
         return value
 
+    async def rule_providers(self) -> dict[str, dict]:
+        value = (await self.request("GET", "/providers/rules")).get("providers")
+        if not isinstance(value, dict) or any(
+            not isinstance(item, dict) for item in value.values()
+        ):
+            raise APIError("Invalid rule provider list from controller")
+        return value
+
+    async def update_rule_provider(self, name: str) -> None:
+        await self.request("PUT", f"/providers/rules/{segment(name)}")
+
+    async def test_group(self, name: str) -> dict[str, int | None]:
+        # Probe each member independently: /group/:name/delay clears automatic pins.
+        value = await self.request("GET", f"/proxies/{segment(name)}")
+        members = value.get("all")
+        if not isinstance(members, list):
+            raise APIError("Invalid proxy group from controller")
+        names = list(dict.fromkeys(n for n in members if isinstance(n, str)))
+        limit = asyncio.Semaphore(6)
+
+        async def probe(node: str) -> tuple[str, int | None]:
+            async with limit:
+                try:
+                    return node, await self.test_delay(node)
+                except APIError as exc:
+                    if exc.status in (401, 403):
+                        raise
+                    return node, None
+
+        results = await asyncio.gather(*(probe(node) for node in names), return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        return dict(results)
+
     async def update_configs(self, changes: dict[str, str | int | bool]) -> None:
         for name, value in changes.items():
-            if name == "mixed-port":
+            if name in CONFIG_PORTS:
                 valid = type(value) is int and 0 <= value <= 65535
             elif name in {"allow-lan", "ipv6"}:
                 valid = isinstance(value, bool)

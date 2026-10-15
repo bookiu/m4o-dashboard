@@ -36,6 +36,7 @@ def parser() -> argparse.ArgumentParser:
         "--refresh-interval", type=float, help="Config/proxy refresh seconds (1–300)"
     )
     result.add_argument("--max-logs", type=int, help="Maximum buffered log entries (100–100000)")
+    result.add_argument("--kernel-config", help="Local mihomo YAML for explicit Ctrl+S saves")
     result.add_argument("--test-url", help="Latency probe URL requested by mihomo, not this client")
     result.add_argument(
         "--demo", action="store_true", help="Run a local simulation; no real mihomo"

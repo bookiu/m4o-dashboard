@@ -12,3 +12,6 @@ interval = 1000
 refresh_interval = 5.0
 max_logs = 5000
 test_url = "https://www.gstatic.com/generate_204"
+
+# Optional local mihomo YAML; Ctrl+S saves edits here independently of runtime apply.
+# kernel_config = "/absolute/path/to/daily.yaml"
